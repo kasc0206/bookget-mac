@@ -171,6 +171,9 @@ func FactoryRouter(siteID string, sUrl string) (map[string]interface{}, error) {
 		//[美国]犹他州家谱
 		Router["www.familysearch.org"] = app.NewFamilysearch()
 
+		//[美国]archive.org
+		Router["archive.org"] = app.NewArchive()
+
 		//[德国]柏林国立图书馆
 		Router["digital.staatsbibliothek-berlin.de"] = app.NewBerlin()
 
