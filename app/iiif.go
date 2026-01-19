@@ -13,7 +13,7 @@ import (
 	"log"
 	"net/http/cookiejar"
 	"net/url"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -211,7 +211,7 @@ func (i *IIIF) doDezoomify(iiifUrls []string) bool {
 		sortId := fmt.Sprintf("%04d", k+1)
 
 		filename := sortId + config.Conf.FileExt
-		dest := path.Join(i.dt.SavePath, filename)
+		dest := filepath.Join(i.dt.SavePath, filename)
 		if FileExist(dest) {
 			continue
 		}
@@ -240,7 +240,7 @@ func (i *IIIF) doNormal(imgUrls []string) bool {
 		ext := util.FileExt(uri)
 		sortId := fmt.Sprintf("%04d", k+1)
 		filename := sortId + ext
-		dest := path.Join(i.dt.SavePath, filename)
+		dest := filepath.Join(i.dt.SavePath, filename)
 		if FileExist(dest) {
 			continue
 		}
