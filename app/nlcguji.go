@@ -17,7 +17,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -101,9 +101,9 @@ func (s *NlcGuji) Run() (msg string, err error) {
 		return "[err=getBookId]", err
 	}
 	s.savePath = config.Conf.Directory
-	s.urlsFile = path.Join(s.savePath, "urls.txt")
+	s.urlsFile = filepath.Join(s.savePath, "urls.txt")
 	//先生成书签目录
-	s.buildCatalog(path.Join(s.savePath, "catalog.txt"))
+	s.buildCatalog(filepath.Join(s.savePath, "catalog.txt"))
 
 	groupedVolumes, err := s.getVolumes()
 	if err != nil || groupedVolumes == nil {
@@ -151,7 +151,7 @@ func (s *NlcGuji) letsGo(canvases []nlc.DataItem) (msg string, err error) {
 		sortId := fmt.Sprintf("%04d", i)
 		fileName := sortId + config.Conf.FileExt
 		//跳过存在的文件
-		if FileExist(path.Join(s.savePath, fileName)) {
+		if FileExist(filepath.Join(s.savePath, fileName)) {
 			s.bar.Add(1)
 			continue
 		}
@@ -179,7 +179,7 @@ func (s *NlcGuji) letsGo(canvases []nlc.DataItem) (msg string, err error) {
 			return "", err
 		}
 		securedBody := s.removeMarkHeader(body, markHeader)
-		_ = os.WriteFile(path.Join(s.savePath, fileName), securedBody, os.ModePerm)
+		_ = os.WriteFile(filepath.Join(s.savePath, fileName), securedBody, os.ModePerm)
 		s.bar.Add(1)
 		time.Sleep(time.Duration(config.Conf.Sleep) * time.Second)
 	}

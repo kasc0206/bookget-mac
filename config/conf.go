@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/spf13/pflag"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -52,17 +52,15 @@ func Init(ctx context.Context) bool {
 	if os.PathSeparator == '\\' {
 		matched, _ := regexp.MatchString(`([^A-z0-9_\\/\-:.]+)`, dir)
 		if matched {
-			fmt.Println("本软件存放目录，不能包含空格、中文等特殊符号。推荐：D:\\bookget")
-			fmt.Println("按回车键终止程序。Press Enter to exit ...")
-			endKey := make([]byte, 1)
-			os.Stdin.Read(endKey)
-			os.Exit(0)
+			fmt.Println("【警告】本软件存放目录，包含空格、中文等特殊符号。推荐：D:\\bookget")
+			fmt.Println("如果后续运行出现异常，请尝试更换到纯英文路径。")
+			fmt.Println()
 		}
 	}
 
 	pflag.StringVarP(&Conf.DUrl, "input", "i", "", "下载 URL")
 	pflag.StringVarP(&Conf.UrlsFile, "input-file", "I", "", "下载 URLs")
-	pflag.StringVarP(&Conf.Directory, "dir", "O", path.Join(dir, "downloads"), "保存文件到目录")
+	pflag.StringVarP(&Conf.Directory, "dir", "O", filepath.Join(dir, "downloads"), "保存文件到目录")
 
 	pflag.StringVarP(&Conf.Seq, "sequence", "p", "", "页面范围，如4:434")
 	pflag.StringVarP(&Conf.Volume, "volume", "v", "", "多册图书，如10:20册，只下载10至20册")
@@ -73,8 +71,8 @@ func Init(ctx context.Context) bool {
 
 	pflag.BoolVarP(&Conf.UseDzi, "dzi", "d", true, "使用 IIIF/DeepZoom 拼图下载")
 
-	pflag.StringVarP(&Conf.CookieFile, "cookies", "C", path.Join(dir, "cookie.txt"), "cookie 文件")
-	pflag.StringVarP(&Conf.HeaderFile, "headers", "H", path.Join(dir, "header.txt"), "header 文件")
+	pflag.StringVarP(&Conf.CookieFile, "cookies", "C", filepath.Join(dir, "cookie.txt"), "cookie 文件")
+	pflag.StringVarP(&Conf.HeaderFile, "headers", "H", filepath.Join(dir, "header.txt"), "header 文件")
 
 	pflag.IntVarP(&Conf.Threads, "threads", "n", 1, "每任务最大线程数")
 	pflag.IntVarP(&Conf.MaxConcurrent, "concurrent", "c", 16, "最大并发任务数")
@@ -109,7 +107,7 @@ func Init(ctx context.Context) bool {
 		Conf.DUrl = v
 	}
 	if Conf.UrlsFile != "" && !strings.Contains(Conf.UrlsFile, string(os.PathSeparator)) {
-		Conf.UrlsFile = path.Join(dir, Conf.UrlsFile)
+		Conf.UrlsFile = filepath.Join(dir, Conf.UrlsFile)
 	}
 	initSeqRange()
 	initVolumeRange()
