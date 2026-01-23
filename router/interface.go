@@ -97,6 +97,9 @@ func FactoryRouter(siteID string, sUrl string) (map[string]interface{}, error) {
 
 		//抗日战争与中日关系文献数据平台
 		Router["www.modernhistory.org.cn"] = app.NewWar1931()
+
+		//[中国]甘肃省图书馆
+		Router["zszy.gslib.com.cn"] = app.NewGslib()
 		//}}} -----------------------------------------------------------------
 
 		//---------------日本--------------------------------------------------
