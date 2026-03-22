@@ -88,6 +88,61 @@ func FileName(uri string) string {
 	return name
 }
 
+func SanitizeFileName(name string) string {
+	replacer := strings.NewReplacer(
+		"\\", "_",
+		"/", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+		"\r", " ",
+		"\n", " ",
+		"\t", " ",
+	)
+	name = replacer.Replace(strings.TrimSpace(name))
+	name = strings.Join(strings.Fields(name), " ")
+	name = strings.Trim(name, ". ")
+	if name == "" {
+		return "bookget"
+	}
+	return name
+}
+
+func UniqueFilePath(dir string, filename string) string {
+	filename = SanitizeFileName(filename)
+	fullPath := filepath.Join(dir, filename)
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		return fullPath
+	}
+
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	for i := 1; ; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s(%d)%s", base, i, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
+func RenameFileUnique(srcPath string, destDir string, filename string) (string, error) {
+	if err := os.MkdirAll(destDir, os.ModePerm); err != nil {
+		return "", err
+	}
+	targetPath := UniqueFilePath(destDir, filename)
+	if srcPath == targetPath {
+		return targetPath, nil
+	}
+	if err := os.Rename(srcPath, targetPath); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
 // 压缩文件
 func Zip(srcFile string, destZip string) error {
 	zipFile, err := os.Create(destZip)

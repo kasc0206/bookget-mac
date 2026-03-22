@@ -20,15 +20,17 @@ import (
 )
 
 type KyudbSnu struct {
-	dt     *DownloadTask
-	itemId string
-	entry  string
+	dt       *DownloadTask
+	itemId   string
+	entry    string
+	pdfNames map[string]string
 }
 
 func NewKyudbSnu() *KyudbSnu {
 	return &KyudbSnu{
 		// 初始化字段
-		dt: new(DownloadTask),
+		dt:       new(DownloadTask),
+		pdfNames: make(map[string]string),
 	}
 }
 
@@ -86,6 +88,12 @@ func (r *KyudbSnu) download() (msg string, err error) {
 	if err != nil || bs == nil {
 		return "requested URL was not found.", err
 	}
+	log.Printf("Page contains mfpdf_link: %v\n", bytes.Contains(bs, []byte("name=\"mfpdf_link\"")))
+	displayLen := len(bs)
+	if displayLen > 500 {
+		displayLen = 500
+	}
+	log.Printf("Page content first %d chars: %s\n", displayLen, string(bs[:displayLen]))
 	//PDF
 	if bytes.Contains(bs, []byte("name=\"mfpdf_link\"")) {
 		r.dt.SavePath = config.Conf.Directory
@@ -98,17 +106,23 @@ func (r *KyudbSnu) download() (msg string, err error) {
 		return "", nil
 	}
 	//图片
-	if r.itemId == "" && r.entry == "renderer" {
+	if r.itemId == "" {
 		match := regexp.MustCompile(`item_cd=([A-z0-9_-]+)`).FindSubmatch(bs)
-		if match == nil {
-			return "requested URL was not found.", err
+		if match != nil {
+			r.itemId = string(match[1])
 		}
-		r.itemId = string(match[1])
+	}
+	log.Printf("Processing image mode: itemId=%s, entry=%s\n", r.itemId, r.entry)
+	if r.itemId == "" {
+		log.Printf("No itemId found, cannot process document\n")
+		return "No itemId found", nil
 	}
 	respVolume, err := r.getVolumes(r.dt.Url, r.dt.Jar)
 	if err != nil {
+		log.Printf("getVolumes error: %v\n", err)
 		return "getVolumes", err
 	}
+	log.Printf("Got %d volumes\n", len(respVolume))
 	for i, vol := range respVolume {
 		if !config.VolumeRange(i) {
 			continue
@@ -180,7 +194,10 @@ func (r *KyudbSnu) doPdf(imgUrls []string) (msg string, err error) {
 			continue
 		}
 		sortId := fmt.Sprintf("%04d", i+1)
-		filename := sortId + ".pdf"
+		filename := r.pdfNames[uri]
+		if filename == "" {
+			filename = BuildOutputFileName(".pdf", r.dt.Title, sortId)
+		}
 		dest := path.Join(r.dt.SavePath, filename)
 		if FileExist(dest) {
 			continue
@@ -347,6 +364,14 @@ func (r *KyudbSnu) getPdfUrls(sUrl string) (canvases []string, err error) {
 	for _, v := range res.VolList {
 		if v.ISPDF == "Y" {
 			pdfUrl := fmt.Sprintf("https://%s/book/mfPdf.do?book_cd=%s&vol_no=%s", r.dt.UrlParsed.Host, v.BOOKCD, v.VOLNO)
+			bookName := NormalizeNamePart(fmt.Sprint(v.BOOKNM))
+			if bookName == "<nil>" || bookName == "" {
+				bookName = NormalizeNamePart(v.ORITIT)
+			}
+			if r.dt.Title == "" {
+				r.dt.Title = bookName
+			}
+			r.pdfNames[pdfUrl] = BuildOutputFileName(".pdf", bookName, v.VOLNO)
 			canvases = append(canvases, pdfUrl)
 		}
 	}
@@ -359,16 +384,26 @@ func (r *KyudbSnu) getBody(apiUrl string, jar *cookiejar.Jar) ([]byte, error) {
 		CookieFile: config.Conf.CookieFile,
 		CookieJar:  jar,
 		Headers: map[string]interface{}{
-			"User-Agent": config.Conf.UserAgent,
+			"User-Agent":      config.Conf.UserAgent,
+			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+			"Accept-Language": "en-US,en;q=0.5",
+			"Accept-Encoding": "gzip, deflate",
+			"Connection":      "keep-alive",
+			"Upgrade-Insecure-Requests": "1",
 		},
 	})
 	resp, err := cli.Get(apiUrl)
 	if err != nil {
+		log.Printf("getBody error: %v\n", err)
 		return nil, err
 	}
 	bs, _ := resp.GetBody()
-	if bs == nil {
-		err = errors.New(resp.GetReasonPhrase())
+	statusCode := resp.GetStatusCode()
+	log.Printf("HTTP Status: %d, Response body length: %d\n", statusCode, len(bs))
+	if bs == nil || statusCode >= 400 {
+		reasonPhrase := resp.GetReasonPhrase()
+		log.Printf("getBody failed: Status=%d, Reason=%s\n", statusCode, reasonPhrase)
+		err = errors.New(reasonPhrase)
 		return nil, err
 	}
 	return bs, nil

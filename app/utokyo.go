@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http/cookiejar"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 )
@@ -64,9 +65,9 @@ func (p *Utokyo) download() (msg string, err error) {
 			continue
 		}
 		log.Printf(" %d/%d volume, %s \n", i+1, len(respVolume), vol)
-		fName := util.FileName(vol)
 		sortId := fmt.Sprintf("%04d", i+1)
-		dest := filepath.Join(p.dt.SavePath, sortId+fName)
+		filename := BuildOutputFileName(path.Ext(vol), p.dt.Title, sortId)
+		dest := filepath.Join(p.dt.SavePath, filename)
 		p.do(dest, vol)
 		util.PrintSleepTime(config.Conf.Sleep)
 	}
@@ -97,6 +98,9 @@ func (p *Utokyo) getVolumes(sUrl string, jar *cookiejar.Jar) (volumes []string, 
 	bs, err := p.getBody(sUrl, jar)
 	if err != nil {
 		return
+	}
+	if p.dt.Title == "" {
+		p.dt.Title = ExtractHTMLTitle(bs)
 	}
 	//取册数
 	matches := regexp.MustCompile(`<a href="pdf/([^"]+)"`).FindAllStringSubmatch(string(bs), -1)

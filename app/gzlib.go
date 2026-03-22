@@ -26,6 +26,7 @@ type Gzlib struct {
 	parsedUrl *url.URL
 	savePath  string
 	bookId    string
+	title     string
 }
 
 func NewGzlib() *Gzlib {
@@ -72,9 +73,12 @@ func (r *Gzlib) Run() (msg string, err error) {
 		return "[err=getBookId]", err
 	}
 	r.savePath = config.Conf.Directory
+	if body, bodyErr := r.getBody(r.rawUrl); bodyErr == nil {
+		r.title = ExtractHTMLTitle(body)
+	}
 
 	apiUrl := fmt.Sprintf("https://%s/attach/GZDD/Attach/%s.pdf", r.parsedUrl.Hostname(), r.bookId)
-	fileName := fmt.Sprintf("%s.pdf", r.bookId)
+	fileName := BuildOutputFileName(".pdf", r.title, r.bookId)
 
 	headers := BuildRequestHeader()
 	r.dm.UseSizeBar = true

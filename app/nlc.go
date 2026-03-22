@@ -9,11 +9,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -32,11 +34,14 @@ type ChinaNlc struct {
 	parsedUrl *url.URL
 	savePath  string
 	bookId    string
+	bookTitle string
+	pubTime   string
 
-	body        []byte
-	dataType    int //0=pdf,1=pic
-	aid         string
-	vectorBooks []string
+	body         []byte
+	dataType     int //0=pdf,1=pic
+	aid          string
+	vectorBooks  []string
+	volumeTitles map[string]string
 }
 
 func NewChinaNlc() *ChinaNlc {
@@ -53,11 +58,12 @@ func NewChinaNlc() *ChinaNlc {
 
 	return &ChinaNlc{
 		// 初始化字段
-		dm:     dm,
-		client: &http.Client{Timeout: config.Conf.Timeout * time.Second, Jar: jar, Transport: tr},
-		ctx:    ctx,
-		cancel: cancel,
-		jar:    jar,
+		dm:           dm,
+		client:       &http.Client{Timeout: config.Conf.Timeout * time.Second, Jar: jar, Transport: tr},
+		ctx:          ctx,
+		cancel:       cancel,
+		jar:          jar,
+		volumeTitles: make(map[string]string),
 	}
 }
 
@@ -75,6 +81,7 @@ func (r *ChinaNlc) GetRouterInit(sUrl string) (map[string]interface{}, error) {
 func (r *ChinaNlc) Run() (msg string, err error) {
 	if strings.Contains(r.rawUrl, "OutOpenBook/Open") {
 		r.body, _ = r.getBody(r.rawUrl)
+		r.loadMetadata(r.body)
 		r.bookId = r.getBookId(string(r.body))
 	} else {
 		r.bookId = r.getBookId(r.rawUrl)
@@ -104,6 +111,150 @@ func (r *ChinaNlc) getBookId(sUrl string) (bookId string) {
 
 	// 默认返回空字符串
 	return ""
+}
+
+func (r *ChinaNlc) loadMetadata(body []byte) {
+	text := string(body)
+	if r.bookTitle == "" {
+		r.bookTitle = extractNlcBookTitle(text)
+	}
+	if r.pubTime == "" {
+		r.pubTime = extractNlcPublishTime(text)
+	}
+	for bid, title := range extractNlcVolumeTitles(text) {
+		if bid != "" && title != "" {
+			r.volumeTitles[bid] = title
+		}
+	}
+}
+
+func extractNlcBookTitle(text string) string {
+	plainText := regexp.MustCompile(`(?s)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>|<[^>]+>`).ReplaceAllString(text, " ")
+	plainText = normalizeNlcText(plainText)
+	if idx := strings.Index(plainText, "责任者："); idx > 0 {
+		prefix := strings.TrimSpace(plainText[:idx])
+		for _, marker := range []string{"资源详情", "卷 册", "显示更多", "分享", "当前位置"} {
+			if pos := strings.LastIndex(prefix, marker); pos >= 0 {
+				prefix = strings.TrimSpace(prefix[pos+len(marker):])
+			}
+		}
+		if prefix != "" {
+			return prefix
+		}
+	}
+
+	if match := regexp.MustCompile(`<title>\s*([^<>]+?)\s*</title>`).FindStringSubmatch(text); len(match) > 1 {
+		title := normalizeNlcText(match[1])
+		if title != "" && !strings.Contains(title, "资源详情") && !strings.Contains(title, "读者云门户") {
+			return title
+		}
+	}
+	return ""
+}
+
+func extractNlcPublishTime(text string) string {
+	plainText := regexp.MustCompile(`(?s)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>|<[^>]+>`).ReplaceAllString(text, " ")
+	plainText = normalizeNlcText(plainText)
+	if idx := strings.Index(plainText, "出版时间："); idx >= 0 {
+		rest := plainText[idx+len("出版时间："):]
+		markers := []string{"索取号：", "文种：", "版本：", "总册数：", "分享", "收藏", "点赞", "卷 册"}
+		end := len(rest)
+		for _, marker := range markers {
+			if pos := strings.Index(rest, marker); pos >= 0 && pos < end {
+				end = pos
+			}
+		}
+		return normalizeNlcText(rest[:end])
+	}
+	return ""
+}
+
+func extractNlcVolumeTitles(text string) map[string]string {
+	volumeTitles := make(map[string]string)
+	matches := regexp.MustCompile(`([^<>\n]+?)\s*<a[^>]+class="a1"[^>]*href="([^"]+)OutOpenBook/([^"]+)"`).FindAllStringSubmatch(text, -1)
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		bid := getURLQueryValue(match[3], "bid")
+		title := normalizeNlcText(match[1])
+		if title == "" || strings.Contains(title, "在线阅读") {
+			continue
+		}
+		if bid != "" && title != "" {
+			volumeTitles[bid] = title
+		}
+	}
+	return volumeTitles
+}
+
+func normalizeNlcText(value string) string {
+	value = html.UnescapeString(value)
+	value = strings.ReplaceAll(value, "&nbsp;", " ")
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	return value
+}
+
+func getURLQueryValue(rawURL string, key string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Query().Get(key)
+}
+
+func (r *ChinaNlc) buildPDFFilename(sourceURL string, fallback string) string {
+	ext := path.Ext(fallback)
+	if ext == "" {
+		ext = ".pdf"
+	}
+	stem := strings.TrimSuffix(fallback, ext)
+	bid := getURLQueryValue(sourceURL, "bid")
+	volumeTitle := normalizeNlcText(r.volumeTitles[bid])
+	if strings.Contains(volumeTitle, "在线阅读") {
+		volumeTitle = ""
+	}
+	bookTitle := normalizeNlcText(r.bookTitle)
+
+	base := stem
+	if bookTitle != "" {
+		if volumeTitle != "" {
+			if strings.Contains(bookTitle, volumeTitle) {
+				base = bookTitle
+			} else {
+				base = bookTitle + "_" + volumeTitle
+			}
+		} else if stem != "" {
+			base = bookTitle + "_" + stem
+		} else {
+			base = bookTitle
+		}
+	} else if volumeTitle != "" {
+		base = volumeTitle
+	}
+
+	pubTime := normalizeNlcText(r.pubTime)
+	if pubTime != "" {
+		base += "_" + pubTime
+	}
+
+	return util.SanitizeFileName(base) + ext
+}
+
+func (r *ChinaNlc) renamePDFIfNeeded(srcPath string, sourceURL string, fallback string) error {
+	if !FileExist(srcPath) {
+		return nil
+	}
+	desiredName := r.buildPDFFilename(sourceURL, fallback)
+	if desiredName == "" || filepath.Base(srcPath) == desiredName {
+		return nil
+	}
+	finalPath, err := util.RenameFileUnique(srcPath, r.savePath, desiredName)
+	if err != nil {
+		return err
+	}
+	log.Printf("Renamed file to %s\n", filepath.Base(finalPath))
+	return nil
 }
 
 func (r *ChinaNlc) download() (msg string, err error) {
@@ -254,6 +405,7 @@ func (r *ChinaNlc) getVolumes() (volumes []string, err error) {
 	if err != nil {
 		return nil, err
 	}
+	r.loadMetadata(r.body)
 	text := util.SubText(string(r.body), "<div id=\"multiple\"", "id=\"catalogDiv\">")
 	//取册数
 	aUrls := regexp.MustCompile(`<a[^>]+class="a1"[^>].+href="([^"]+)OutOpenBook/([^"]+)"`).FindAllStringSubmatch(text, -1)
@@ -283,8 +435,17 @@ func (r *ChinaNlc) getVolumes() (volumes []string, err error) {
 }
 
 func (r *ChinaNlc) doPdfUrl(sUrl, filename string) error {
+	desiredName := r.buildPDFFilename(sUrl, filename)
+	desiredDest := filepath.Join(r.savePath, desiredName)
+	if desiredName != "" && FileExist(desiredDest) {
+		return nil
+	}
+
 	dest := path.Join(r.savePath, filename)
 	if FileExist(dest) {
+		if err := r.renamePDFIfNeeded(dest, sUrl, filename); err != nil {
+			return err
+		}
 		return nil
 	}
 	v, err := r.identifier(sUrl)
@@ -315,6 +476,10 @@ func (r *ChinaNlc) doPdfUrl(sUrl, filename string) error {
 	resp, err := gohttp.FastGet(r.ctx, pdfUrl, opts)
 	if err != nil || resp.GetStatusCode() != 200 {
 		fmt.Println(err)
+		return err
+	}
+	if err := r.renamePDFIfNeeded(dest, sUrl, filename); err != nil {
+		return err
 	}
 	util.PrintSleepTime(config.Conf.Sleep)
 	fmt.Println()

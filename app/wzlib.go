@@ -15,13 +15,15 @@ import (
 )
 
 type Wzlib struct {
-	dt *DownloadTask
+	dt       *DownloadTask
+	pdfNames map[string]string
 }
 
 func NewWzlib() *Wzlib {
 	return &Wzlib{
 		// 初始化字段
-		dt: new(DownloadTask),
+		dt:       new(DownloadTask),
+		pdfNames: make(map[string]string),
 	}
 }
 
@@ -90,7 +92,10 @@ func (p *Wzlib) do(dUrls []string) (msg string, err error) {
 		}
 		log.Printf("Get %d/%d, URL: %s\n", i+1, size, uri)
 		sortId := fmt.Sprintf("%04d", i+1)
-		filename := sortId + ".pdf"
+		filename := p.pdfNames[uri]
+		if filename == "" {
+			filename = BuildOutputFileName(".pdf", p.dt.Title, sortId)
+		}
 		dest := path.Join(p.dt.SavePath, filename)
 		if FileExist(dest) {
 			continue
@@ -131,12 +136,14 @@ func (p *Wzlib) getCanvases(sUrl string, jar *cookiejar.Jar) (canvases []string,
 		log.Printf("json.Unmarshal failed: %s\n", err)
 		return
 	}
+	p.dt.Title = NormalizeNamePart(resT.Title)
 	for _, ret := range resT.DigitalResourceData {
 		m := regexp.MustCompile(`file=(\S+)`).FindStringSubmatch(ret.Url)
 		if m == nil {
 			continue
 		}
 		pdfUrl := "https://db.wzlib.cn" + m[1]
+		p.pdfNames[pdfUrl] = BuildOutputFileName(".pdf", p.dt.Title, ret.Title)
 		canvases = append(canvases, pdfUrl)
 	}
 	return canvases, nil
@@ -149,9 +156,11 @@ func (p *Wzlib) OyjyGetCanvases(bookId string) (canvases []string, err error) {
 	if err == nil {
 		var result wzlib.ResultPdf
 		if err = json.Unmarshal(bs, &result); err == nil {
+			p.dt.Title = NormalizeNamePart(result.Data.DcTitle)
 			m := regexp.MustCompile(`file=(\S+)`).FindStringSubmatch(result.Data.WzlPdfUrl)
 			if m != nil {
 				pdfUrl := "https://db.wzlib.cn" + m[1]
+				p.pdfNames[pdfUrl] = BuildOutputFileName(".pdf", result.Data.DcTitle, result.Data.RelateName)
 				canvases = append(canvases, pdfUrl)
 				return canvases, err
 			}
@@ -168,11 +177,15 @@ func (p *Wzlib) OyjyGetCanvases(bookId string) (canvases []string, err error) {
 	if err = json.Unmarshal(bs, &result); err != nil {
 		return
 	}
+	if len(result) > 0 {
+		p.dt.Title = NormalizeNamePart(result[0].Title)
+	}
 	for _, v := range result[0].Items {
 		if v.WzlPdfUrl == "" {
 			continue
 		}
 		pdfUrl := "https://db.wzlib.cn" + v.WzlPdfUrl
+		p.pdfNames[pdfUrl] = BuildOutputFileName(".pdf", result[0].Title, v.DcTitle)
 		canvases = append(canvases, pdfUrl)
 	}
 	return canvases, err

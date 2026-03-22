@@ -9,11 +9,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -96,6 +98,53 @@ func postBody(sUrl string, d []byte, jar *cookiejar.Jar) ([]byte, error) {
 	}
 	bs, _ := resp.GetBody()
 	return bs, err
+}
+
+func NormalizeNamePart(value string) string {
+	value = html.UnescapeString(value)
+	value = strings.ReplaceAll(value, "&nbsp;", " ")
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	return value
+}
+
+func BuildOutputFileName(ext string, parts ...string) string {
+	if ext == "" {
+		ext = ".pdf"
+	}
+	cleaned := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = NormalizeNamePart(part)
+		if part != "" {
+			if _, ok := seen[part]; ok {
+				continue
+			}
+			seen[part] = struct{}{}
+			cleaned = append(cleaned, part)
+		}
+	}
+	if len(cleaned) == 0 {
+		cleaned = append(cleaned, "bookget")
+	}
+	return util.SanitizeFileName(strings.Join(cleaned, "_")) + ext
+}
+
+func ExtractHTMLTitle(bs []byte) string {
+	text := string(bs)
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?is)<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']`),
+		regexp.MustCompile(`(?is)<meta[^>]+name=["']title["'][^>]+content=["']([^"']+)["']`),
+		regexp.MustCompile(`(?is)<title>\s*([^<>]+?)\s*</title>`),
+	}
+	for _, pattern := range patterns {
+		if match := pattern.FindStringSubmatch(text); len(match) > 1 {
+			title := NormalizeNamePart(match[1])
+			if title != "" {
+				return title
+			}
+		}
+	}
+	return ""
 }
 
 func postJSON(sUrl string, d interface{}, jar *cookiejar.Jar) ([]byte, error) {
